@@ -72,7 +72,7 @@ description: "Create and maintain an Obsidian-style graph memory bank in a code 
 2. Создай индексы:
    - `docs/graph/tasks/index.md`
    - `docs/graph/project/index.md`
-   - `docs/graph/processes/index.md`
+   - `docs/graph/processes/index.md` или `docs/graph/process/index.md` (в зависимости от структуры репозитория)
 3. Зафиксируй соглашения:
    - схема `id` (обычно префикс + путь, например `graph:project/<slug>`)
    - статусы: `stub | curated | generated`

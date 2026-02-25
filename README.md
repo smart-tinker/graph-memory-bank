@@ -18,7 +18,6 @@ Then invoke the skill per your tool's conventions (Codex/Claude Code/OpenCode).
 - `skills/graph-memory-bank/SKILL.md` – the canonical, tool-agnostic instructions.
 - `skills/graph-memory-bank/references/` – templates and quality bar.
 - `skills/graph-memory-bank/scripts/` – lightweight linter.
-- `skills/graph-memory-bank/portable/` – adapters/examples for other tools.
 
 ## License
 

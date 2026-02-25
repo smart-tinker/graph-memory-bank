@@ -56,7 +56,9 @@ def _read_frontmatter(path: Path) -> tuple[Frontmatter | None, str | None]:
 
     # Minimal YAML-ish extraction. Good enough for the recommended schema.
     def pick(key: str) -> str | None:
-        m = re.search(rf"(?m)^{re.escape(key)}:\\s*\"?([^\"\\n]+)\"?\\s*$", fm_text)
+        # NOTE: Use real whitespace/newline tokens. Avoid over-escaping '\s'/'\n',
+        # otherwise we end up matching a literal backslash and never extracting keys.
+        m = re.search(rf"(?m)^{re.escape(key)}:\s*\"?([^\"\n]+)\"?\s*$", fm_text)
         if not m:
             return None
         return m.group(1).strip()

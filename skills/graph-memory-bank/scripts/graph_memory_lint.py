@@ -58,12 +58,27 @@ def _read_frontmatter(path: Path) -> tuple[Frontmatter | None, str | None]:
 
     # Minimal YAML-ish extraction. Good enough for the recommended schema.
     def pick(key: str) -> str | None:
-        # NOTE: Use real whitespace/newline tokens. Avoid over-escaping '\s'/'\n',
-        # otherwise we end up matching a literal backslash and never extracting keys.
-        m = re.search(rf"(?m)^{re.escape(key)}:\s*\"?([^\"\n]+)\"?\s*$", fm_text)
+        # NOTE:
+        # - Stay dependency-free; this is not a full YAML parser.
+        # - Accept common YAML scalar forms used in repos: unquoted, "double-quoted", 'single-quoted'.
+        # - Titles/descriptions often contain double quotes, so single-quoted values must be supported.
+        m = re.search(rf"(?m)^{re.escape(key)}:\s*(.*?)\s*$", fm_text)
         if not m:
             return None
-        return m.group(1).strip()
+        v = (m.group(1) or "").strip()
+        if not v:
+            return None
+
+        # Strip trailing inline comment for unquoted values: key: value  # comment
+        if v[0] not in ("'", '"') and "#" in v:
+            v = v.split("#", 1)[0].rstrip()
+
+        # Unwrap simple quotes on a single line.
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
+            v = v[1:-1]
+
+        v = v.strip()
+        return v or None
 
     return (
         Frontmatter(

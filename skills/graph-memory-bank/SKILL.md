@@ -142,9 +142,24 @@ description: "Create and maintain an Obsidian-style graph memory bank in a code 
 3. Прогони быстрые проверки:
    - дубликаты `id`
    - отсутствие frontmatter
+   - битые ссылки между узлами
+   - orphan nodes (узлы без входящих ссылок внутри `docs/graph`)
    - сломанные относительные ссылки (если есть время)
 
 Для базовой проверки можно использовать `scripts/graph_memory_lint.py`.
+
+Пример:
+
+```bash
+python3 scripts/graph_memory_lint.py --root docs/graph
+```
+
+Опционально можно отключать части проверок:
+
+```bash
+python3 scripts/graph_memory_lint.py --root docs/graph --no-check-links
+python3 scripts/graph_memory_lint.py --root docs/graph --no-check-orphans
+```
 
 ## Ресурсы в skill
 

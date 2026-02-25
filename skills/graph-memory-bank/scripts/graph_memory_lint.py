@@ -19,9 +19,11 @@ import sys
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
+from urllib.parse import unquote
 
 
 FM_DELIM = "---"
+FENCE = "```"
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,70 @@ def _read_frontmatter(path: Path) -> tuple[Frontmatter | None, str | None]:
     )
 
 
+def _strip_fenced_code_blocks(text: str) -> str:
+    """
+    Remove fenced code blocks (``` ... ```) to reduce false positives when parsing links.
+    This is intentionally simple and line-based.
+    """
+    out: list[str] = []
+    in_fence = False
+    for line in text.splitlines():
+        if line.strip().startswith(FENCE):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            out.append(line)
+    return "\n".join(out)
+
+
+def _extract_markdown_link_targets(text: str) -> list[str]:
+    """
+    Extract raw link targets from markdown links/images: [text](target), ![alt](target).
+    Intentionally lightweight (no full markdown parser).
+    """
+    stripped = _strip_fenced_code_blocks(text)
+    targets: list[str] = []
+    # Match both links and images: [text](target) / ![alt](target)
+    for m in re.finditer(r"!?\[[^\]]*\]\(([^)]+)\)", stripped):
+        t = (m.group(1) or "").strip()
+        if not t:
+            continue
+        targets.append(t)
+    return targets
+
+
+def _normalize_link_target(raw: str) -> str:
+    t = raw.strip()
+    if t.startswith("<") and t.endswith(">"):
+        t = t[1:-1].strip()
+    # drop query/fragment
+    for sep in ("#", "?"):
+        if sep in t:
+            t = t.split(sep, 1)[0].strip()
+    # markdown escapes / URL encoding
+    t = t.replace("\\)", ")").replace("\\(", "(")
+    t = unquote(t)
+    return t
+
+
+def _is_external_link(target: str) -> bool:
+    t = target.lower()
+    if t.startswith("#"):
+        return True
+    if "://" in t:
+        return True
+    if t.startswith("mailto:") or t.startswith("tel:"):
+        return True
+    return False
+
+
+def _resolve_link_path(from_file: Path, target: str) -> Path:
+    # Resolve relative to the file folder. Treat absolute paths as absolute.
+    if os.path.isabs(target):
+        return Path(target).resolve()
+    return (from_file.parent / target).resolve()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -91,6 +157,37 @@ def main() -> int:
         "--required",
         default="id,type,title,status",
         help="Comma-separated required keys (default: id,type,title,status)",
+    )
+    ap.add_argument(
+        "--check-links",
+        dest="check_links",
+        action="store_true",
+        default=True,
+        help="Check that local markdown links to *.md files exist (default: true).",
+    )
+    ap.add_argument(
+        "--no-check-links",
+        dest="check_links",
+        action="store_false",
+        help="Disable broken-link checks.",
+    )
+    ap.add_argument(
+        "--check-orphans",
+        dest="check_orphans",
+        action="store_true",
+        default=True,
+        help="Check for orphan nodes (no inbound links within --root). Default: true.",
+    )
+    ap.add_argument(
+        "--no-check-orphans",
+        dest="check_orphans",
+        action="store_false",
+        help="Disable orphan-node checks.",
+    )
+    ap.add_argument(
+        "--root-index",
+        default="index.md",
+        help="File name treated as the root entrypoint for orphan checks (relative to --root). Default: index.md",
     )
     args = ap.parse_args()
 
@@ -115,11 +212,15 @@ def main() -> int:
 
     errors: list[tuple[Path, str]] = []
     ids: dict[str, list[Path]] = {}
+    inbound: dict[Path, int] = {p.resolve(): 0 for p in md_files}
+
+    def record_error(p: Path, code: str) -> None:
+        errors.append((p, code))
 
     for p in sorted(md_files):
         fm, err = _read_frontmatter(p)
         if err:
-            errors.append((p, err))
+            record_error(p, err)
             continue
 
         assert fm is not None
@@ -131,12 +232,47 @@ def main() -> int:
         }
         for k in required:
             if not kv.get(k):
-                errors.append((p, f"missing_{k}"))
+                record_error(p, f"missing_{k}")
 
         if fm.id:
             ids.setdefault(fm.id, []).append(p)
 
+        if args.check_links or args.check_orphans:
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")
+            except Exception as e:
+                record_error(p, f"read_error: {e}")
+                continue
+
+            for raw_target in _extract_markdown_link_targets(text):
+                if _is_external_link(raw_target):
+                    continue
+                target = _normalize_link_target(raw_target)
+                if not target:
+                    continue
+                if not target.lower().endswith(".md"):
+                    continue
+
+                resolved = _resolve_link_path(p, target)
+
+                if args.check_links and not resolved.exists():
+                    record_error(p, f"broken_link:{target}")
+
+                if args.check_orphans:
+                    resolved_norm = resolved.resolve()
+                    if resolved_norm in inbound and resolved_norm != p.resolve():
+                        inbound[resolved_norm] += 1
+
     dup_ids = {k: v for k, v in ids.items() if len(v) > 1}
+
+    if args.check_orphans:
+        root_index = (root / str(args.root_index)).resolve()
+        for p in sorted(md_files):
+            pp = p.resolve()
+            if pp == root_index:
+                continue
+            if inbound.get(pp, 0) == 0:
+                record_error(p, "orphan_node")
 
     def safe_print(s: str = "") -> None:
         try:
